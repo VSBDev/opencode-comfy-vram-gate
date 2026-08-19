@@ -90,3 +90,20 @@ test("a failed handback keeps its lease until recovery", async () => {
     await item.dispose()
   }
 })
+
+test("recovery unloads a model that reloaded after a failed tool", async () => {
+  const item = await fixture()
+  try {
+    const handoff = await item.gate.before({ callID: "failed-tool" })
+    item.state.models = ["large-local-model:latest"]
+    item.state.freeMiB = 7_000
+
+    const recovered = await item.gate.recover(handoff.lease)
+    assert.deepEqual(recovered.unloadedOllamaModels, ["large-local-model:latest"])
+    assert.equal(item.state.ollamaUnloadRequests.length, 2)
+    assert.equal(item.state.comfyFreeRequests, 2)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})

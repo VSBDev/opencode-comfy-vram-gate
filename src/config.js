@@ -35,8 +35,7 @@ export const DEFAULT_CONFIG = Object.freeze({
     heavyToolSuffixes: [
       "comfy_local_run_workflow",
       "comfy_local_run_template",
-      "comfy_local_generate_image",
-      "comfy_local_vary_workflow"
+      "comfy_local_generate_image"
     ],
     uploadToolSuffix: "comfy_local_upload_file",
   },

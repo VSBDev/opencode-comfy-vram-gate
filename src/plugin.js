@@ -28,22 +28,39 @@ export function createHooks({ config, client, gate = new VramGate(config), stagi
     return config.plugin.heavyToolSuffixes.some((suffix) => normalized.endsWith(suffix))
   }
 
-  async function recoverSession(sessionID) {
-    const entries = [...leases.entries()].filter(([, item]) => item.sessionID === sessionID)
-    for (const [callID, item] of entries) {
-      try {
-        const detail = await gate.recover(item.lease)
-        await safeLog(client, "warn", "Recovered an orphaned GPU handoff", { callID, detail })
-      } catch (error) {
-        await safeLog(client, "error", "Failed to recover an orphaned GPU handoff", { callID, error: error?.message || String(error) })
-      } finally {
-        leases.delete(callID)
-      }
+  async function recoverCall(callID, reason) {
+    const item = leases.get(callID)
+    if (!item) return false
+
+    // Claim recovery before awaiting. OpenCode can emit the same terminal tool
+    // part more than once, and a session event may race it.
+    leases.delete(callID)
+    try {
+      const detail = await gate.recover(item.lease)
+      await safeLog(client, "warn", "Recovered an orphaned GPU handoff", { callID, reason, detail })
+    } catch (error) {
+      await safeLog(client, "error", "Failed to recover an orphaned GPU handoff", { callID, reason, error: error?.message || String(error) })
     }
+    return true
+  }
+
+  async function recoverSession(sessionID, reason = "session-terminal") {
+    const callIDs = [...leases.entries()]
+      .filter(([, item]) => item.sessionID === sessionID)
+      .map(([callID]) => callID)
+    for (const callID of callIDs) await recoverCall(callID, reason)
   }
 
   return {
     event: async ({ event }) => {
+      if (event?.type === "message.part.updated") {
+        const part = event?.properties?.part
+        if (part?.type === "tool" && part?.state?.status === "error") {
+          await recoverCall(part.callID, "tool-error")
+        }
+        return
+      }
+
       if (!["session.idle", "session.error", "session.deleted"].includes(event?.type)) return
       const sessionID = sessionIDFromEvent(event)
       if (!sessionID) return
@@ -57,6 +74,12 @@ export function createHooks({ config, client, gate = new VramGate(config), stagi
     "tool.execute.before": async (input, output) => {
       if (await staging.beforeUpload(input, output)) return
       if (!isHeavyTool(input.tool)) return
+
+      // Defense in depth for OpenCode versions that do not publish a terminal
+      // tool-part event after transport failure. Never let a session deadlock
+      // against its own orphaned lease on the next heavy call.
+      await recoverSession(input.sessionID, "next-heavy-call")
+
       if (config.plugin.forceBlocking) {
         output.args.wait = true
         output.args.timeout_seconds = Math.max(Number(output.args.timeout_seconds || 0), config.timeouts.renderSeconds)

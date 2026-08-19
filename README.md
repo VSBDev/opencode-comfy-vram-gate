@@ -151,8 +151,7 @@ Start with [.env.example](.env.example), copy it to `.env`, and put every machin
     "heavyToolSuffixes": [
       "comfy_local_run_workflow",
       "comfy_local_run_template",
-      "comfy_local_generate_image",
-      "comfy_local_vary_workflow"
+      "comfy_local_generate_image"
     ],
     "uploadToolSuffix": "comfy_local_upload_file"
   },
@@ -172,7 +171,7 @@ Start with [.env.example](.env.example), copy it to `.env`, and put every machin
 | `gpu.minimumFreeMiB` | Absolute free-memory target. When `null`, `minimumFreeRatio` is used. |
 | `timeouts.renderSeconds` | Maximum blocking render/recovery time. Set this above the longest expected generation. |
 | `lock.path` | Shared lock for one physical GPU. Sessions coordinating the same GPU must use the same path. |
-| `plugin.heavyToolSuffixes` | MCP tool suffixes that trigger a handoff. Hyphens in actual names are normalized to underscores. |
+| `plugin.heavyToolSuffixes` | MCP tool suffixes that trigger a handoff. Hyphens in actual names are normalized to underscores. Include only tools that actually queue GPU work; JSON-only inspection or variation tools should stay outside this list. |
 | `staging.enabled` | Tracks generated outputs uploaded back into ComfyUI input and removes only newly created copies at session idle. |
 
 When staging cleanup is enabled, the plugin snapshots the input tree before upload and sets `overwrite: false`. It never deletes a target that existed before that upload. Leave this feature disabled unless the OpenCode process can see the same ComfyUI input directory as the container.
@@ -235,8 +234,9 @@ For a reversible first-user migration from an older local gate, follow [docs/fir
 - Ollama unload timeout: release the lease and do not submit the ComfyUI tool.
 - Insufficient free VRAM: release the lease and do not submit the tool.
 - Tool transport returns before its job: keep the hook open until the ComfyUI queue really drains.
-- Render/tool failure: recover, free ComfyUI, and release the lease when the session reaches an end state.
+- Render/tool failure: recover immediately from OpenCode's terminal tool-error event, unload an Ollama model that raced back into VRAM, free ComfyUI, and release the lease.
 - Missing after hook: recover on `session.idle`, `session.error`, or `session.deleted`.
+- Missing terminal event: recover the same session's orphaned lease before its next heavy tool call.
 - Crashed owner: a later caller can reclaim the lock when the PID is dead on the same host or its heartbeat exceeds `staleAfterSeconds`.
 
 Unloading `all` models affects every Ollama client using that server. Use `listed` when the Ollama instance is shared with unrelated users.

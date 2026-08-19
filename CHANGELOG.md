@@ -4,6 +4,23 @@ All notable changes to this project will be documented here. The format follows 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-19
+
+### Fixed
+
+- Recover GPU leases immediately from terminal OpenCode tool-error events instead
+  of waiting for a later session event.
+- Unload Ollama again during recovery when the model reloaded before the error
+  event arrived.
+- Recover a same-session orphan before its next heavy call, preventing a failed
+  MCP request from deadlocking against its own lease.
+
+### Changed
+
+- Stop treating JSON-only `comfy_local_vary_workflow` calls as GPU-heavy by
+  default. Installations where that tool renders can add it back through
+  `plugin.heavyToolSuffixes` or `OCVRAM_HEAVY_TOOL_SUFFIXES`.
+
 ## [0.1.0] - 2026-08-19
 
 ### Added

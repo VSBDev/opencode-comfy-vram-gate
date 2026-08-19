@@ -199,8 +199,12 @@ export class VramGate {
   async recover(lease) {
     try {
       await this.waitForComfyIdle()
+      // A failed tool can let OpenCode start its next model turn before the
+      // recovery event is delivered. Unload that newly resident model again so
+      // cleanup can reach the same verified free-VRAM target as a normal handoff.
+      const unloadedOllamaModels = await this.unloadOllama()
       const memory = await this.freeComfy()
-      return { phase: "recovery", ...memory }
+      return { phase: "recovery", unloadedOllamaModels, ...memory }
     } finally {
       await lease?.release().catch(() => {})
     }
