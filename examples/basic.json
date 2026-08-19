@@ -1,0 +1,12 @@
+{
+  "ollama": {
+    "url": "http://127.0.0.1:11434",
+    "unloadPolicy": "all"
+  },
+  "comfy": {
+    "url": "http://127.0.0.1:8188"
+  },
+  "gpu": {
+    "minimumFreeRatio": 0.85
+  }
+}
