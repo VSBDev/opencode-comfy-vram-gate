@@ -21,7 +21,7 @@ function json(response, status, payload) {
   response.end(JSON.stringify(payload))
 }
 
-export async function startMockServices({ busy = false } = {}) {
+export async function startMockServices({ busy = false, freedMiB = 32_768 } = {}) {
   const state = {
     models: ["large-local-model:latest"],
     queue: busy ? { queue_running: [[1]], queue_pending: [] } : { queue_running: [], queue_pending: [] },
@@ -52,7 +52,7 @@ export async function startMockServices({ busy = false } = {}) {
     if (request.method === "POST" && request.url === "/free") {
       await readBody(request)
       state.comfyFreeRequests += 1
-      state.freeMiB = state.totalMiB
+      state.freeMiB = freedMiB
       return json(response, 200, { ok: true })
     }
     return json(response, 404, { error: "not found" })

@@ -114,15 +114,30 @@ export class VramGate {
     return Math.floor(totalMiB * this.config.gpu.minimumFreeRatio)
   }
 
+  requiredFreeTargetMiB(device, requiredFreeMiB) {
+    if (requiredFreeMiB === undefined || requiredFreeMiB === null) return this.freeTargetMiB(device)
+    const targetMiB = Number(requiredFreeMiB)
+    if (!Number.isFinite(targetMiB) || targetMiB <= 0) {
+      throw new GateError("requiredFreeMiB must be a positive number", { phase: "inspect" })
+    }
+    const totalMiB = Math.floor(Number(device.vram_total || 0) / (1024 * 1024))
+    if (!(totalMiB > 0)) throw new GateError("ComfyUI did not report total VRAM", { phase: "inspect" })
+    const roundedTargetMiB = Math.ceil(targetMiB)
+    if (roundedTargetMiB > totalMiB) {
+      throw new GateError(`Consumer requires ${roundedTargetMiB} MiB free VRAM but the GPU reports ${totalMiB} MiB total`, { phase: "inspect" })
+    }
+    return roundedTargetMiB
+  }
+
   async comfyFreeMiB() {
     const device = this.primaryDevice(await this.comfyStats())
     return Math.floor(Number(device.vram_free || 0) / (1024 * 1024))
   }
 
-  async freeComfy() {
+  async freeComfy({ requiredFreeMiB } = {}) {
     await this.requireComfyIdle()
     const initialDevice = this.primaryDevice(await this.comfyStats())
-    const targetMiB = this.freeTargetMiB(initialDevice)
+    const targetMiB = this.requiredFreeTargetMiB(initialDevice, requiredFreeMiB)
     await this.request("POST", this.endpoint(this.config.comfy.url, "/free"), {
       body: { unload_models: true, free_memory: true },
       timeoutMs: this.config.timeouts.requestMs,
@@ -190,12 +205,15 @@ export class VramGate {
    * unloaded, and ComfyUI releases any resident models. The caller owns the
    * lease until afterConsumer() or recoverConsumer() completes.
    */
-  async beforeConsumer(metadata = {}) {
-    const lease = await this.lock.acquire({ target: "local-consumer", ...metadata })
+  async beforeConsumer(metadata = {}, { requiredFreeMiB } = {}) {
+    const leaseMetadata = { ...metadata, target: "local-consumer" }
+    if (requiredFreeMiB === undefined) delete leaseMetadata.requiredFreeMiB
+    else leaseMetadata.requiredFreeMiB = requiredFreeMiB
+    const lease = await this.lock.acquire(leaseMetadata)
     try {
       await this.requireComfyIdle()
       const unloadedOllamaModels = await this.unloadOllama()
-      const memory = await this.freeComfy()
+      const memory = await this.freeComfy({ requiredFreeMiB })
       return {
         lease,
         detail: {
@@ -231,7 +249,7 @@ export class VramGate {
    * models. The ComfyUI system endpoint then provides the common free-VRAM
    * verification used by every consumer of this gate.
    */
-  async afterConsumer(lease, { releaseConsumer, waitForConsumerIdle, label = "local consumer" } = {}) {
+  async afterConsumer(lease, { releaseConsumer, waitForConsumerIdle, label = "local consumer", requiredFreeMiB } = {}) {
     if (typeof releaseConsumer !== "function") {
       throw new GateError("releaseConsumer must be a function", { phase: "after-consumer" })
     }
@@ -239,7 +257,7 @@ export class VramGate {
       await waitForConsumerIdle?.()
       const consumer = await releaseConsumer()
       const unloadedOllamaModels = await this.unloadOllama()
-      const memory = await this.freeComfy()
+      const memory = await this.freeComfy({ requiredFreeMiB: requiredFreeMiB ?? lease?.owner?.requiredFreeMiB })
       await lease?.release()
       return { phase: "after-consumer", label, consumer, unloadedOllamaModels, ...memory }
     } catch (error) {
@@ -247,12 +265,12 @@ export class VramGate {
     }
   }
 
-  async recoverConsumer(lease, { releaseConsumer, waitForConsumerIdle, label = "local consumer" } = {}) {
+  async recoverConsumer(lease, { releaseConsumer, waitForConsumerIdle, label = "local consumer", requiredFreeMiB } = {}) {
     try {
       await waitForConsumerIdle?.()
       const consumer = typeof releaseConsumer === "function" ? await releaseConsumer() : undefined
       const unloadedOllamaModels = await this.unloadOllama()
-      const memory = await this.freeComfy()
+      const memory = await this.freeComfy({ requiredFreeMiB: requiredFreeMiB ?? lease?.owner?.requiredFreeMiB })
       return { phase: "consumer-recovery", label, consumer, unloadedOllamaModels, ...memory }
     } finally {
       await lease?.release().catch(() => {})

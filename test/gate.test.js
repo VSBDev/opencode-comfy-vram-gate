@@ -133,6 +133,39 @@ test("a non-Comfy consumer unloads before the shared lease is released", async (
   }
 })
 
+test("a local consumer can declare a smaller task-specific free-VRAM requirement", async () => {
+  const item = await fixture({ freedMiB: 24_000 })
+  try {
+    const handoff = await item.gate.beforeConsumer(
+      { consumer: "image-renderer", callID: "render-small" },
+      { requiredFreeMiB: 22_000 },
+    )
+    assert.equal(handoff.detail.targetMiB, 22_000)
+    assert.equal(handoff.lease.owner.requiredFreeMiB, 22_000)
+
+    const handback = await item.gate.afterConsumer(handoff.lease, {
+      releaseConsumer: async () => ({ workers: "stopped" }),
+    })
+    assert.equal(handback.targetMiB, 22_000)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("the configured free-VRAM target still applies when a consumer omits a requirement", async () => {
+  const item = await fixture({ freedMiB: 24_000 })
+  try {
+    await assert.rejects(
+      () => item.gate.beforeConsumer({ consumer: "default-renderer", callID: "render-default", requiredFreeMiB: 1 }),
+      /at least 28000 MiB free VRAM/,
+    )
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
 test("a failed non-Comfy release keeps the lease available for recovery", async () => {
   const item = await fixture()
   try {

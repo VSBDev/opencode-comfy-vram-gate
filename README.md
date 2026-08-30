@@ -46,7 +46,10 @@ import { VramGate } from "opencode-comfy-vram-gate/core"
 import { loadConfig } from "opencode-comfy-vram-gate/config"
 
 const gate = new VramGate(await loadConfig())
-const handoff = await gate.beforeConsumer({ consumer: "my-app", callID: "render-1" })
+const handoff = await gate.beforeConsumer(
+  { consumer: "my-app", callID: "render-1" },
+  { requiredFreeMiB: 22_000 },
+)
 try {
   await render()
   await gate.afterConsumer(handoff.lease, {
@@ -61,6 +64,11 @@ try {
   throw error
 }
 ```
+
+`requiredFreeMiB` is optional. It lets a consumer declare the requirement of
+the specific task it is about to run instead of inheriting one global maximum.
+The requirement is stored on the lease and automatically reused during normal
+handback or recovery. Consumers that omit it retain the configured gate target.
 
 Every process sharing one physical GPU must resolve the same `lock.path`. The existing OpenCode Comfy plugin and external consumers therefore cannot start heavy work at the same time.
 

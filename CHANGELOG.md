@@ -4,6 +4,11 @@ All notable changes to this project will be documented here. The format follows 
 
 ## [Unreleased]
 
+### Added
+
+- Optional task-specific `requiredFreeMiB` targets for generic local consumers;
+  handback and recovery reuse the requirement stored on the lease.
+
 ## [0.2.0] - 2026-08-30
 
 ### Added
