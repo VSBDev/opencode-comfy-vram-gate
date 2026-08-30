@@ -4,6 +4,20 @@ All notable changes to this project will be documented here. The format follows 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-30
+
+### Added
+
+- Generic `beforeConsumer`, `afterConsumer`, and `recoverConsumer` lifecycle
+  methods for local inference applications.
+- A public lock export so integrations can inspect the shared lease protocol
+  without reaching into package internals.
+
+### Changed
+
+- Verify that an external consumer has unloaded its own workers before free
+  VRAM is checked and the shared lease is released.
+
 ## [0.1.1] - 2026-08-19
 
 ### Fixed

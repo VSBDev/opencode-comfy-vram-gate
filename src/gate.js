@@ -182,6 +182,35 @@ export class VramGate {
     }
   }
 
+  /**
+   * Acquire the shared GPU for a local consumer other than ComfyUI.
+   *
+   * Preparation is deliberately identical to the ComfyUI handoff: the
+   * exclusive lease is acquired first, ComfyUI must be idle, Ollama is
+   * unloaded, and ComfyUI releases any resident models. The caller owns the
+   * lease until afterConsumer() or recoverConsumer() completes.
+   */
+  async beforeConsumer(metadata = {}) {
+    const lease = await this.lock.acquire({ target: "local-consumer", ...metadata })
+    try {
+      await this.requireComfyIdle()
+      const unloadedOllamaModels = await this.unloadOllama()
+      const memory = await this.freeComfy()
+      return {
+        lease,
+        detail: {
+          phase: "before-consumer",
+          unloadedOllamaModels,
+          ...memory,
+          lease: lease.owner,
+        },
+      }
+    } catch (error) {
+      await lease.release().catch(() => {})
+      throw new GateError(`GPU handoff failed before local consumer execution: ${error?.message || error}`, { cause: error, phase: "before-consumer" })
+    }
+  }
+
   async after(lease) {
     try {
       // Do not trust a tool transport returning to mean that its queued job is
@@ -193,6 +222,40 @@ export class VramGate {
       return { phase: "after", ...memory }
     } catch (error) {
       throw new GateError(`GPU handback failed after ComfyUI execution: ${error?.message || error}`, { cause: error, phase: "after" })
+    }
+  }
+
+  /**
+   * Release a non-Comfy GPU consumer while the shared lease is still held.
+   * releaseConsumer must resolve only after that consumer has unloaded its
+   * models. The ComfyUI system endpoint then provides the common free-VRAM
+   * verification used by every consumer of this gate.
+   */
+  async afterConsumer(lease, { releaseConsumer, waitForConsumerIdle, label = "local consumer" } = {}) {
+    if (typeof releaseConsumer !== "function") {
+      throw new GateError("releaseConsumer must be a function", { phase: "after-consumer" })
+    }
+    try {
+      await waitForConsumerIdle?.()
+      const consumer = await releaseConsumer()
+      const unloadedOllamaModels = await this.unloadOllama()
+      const memory = await this.freeComfy()
+      await lease?.release()
+      return { phase: "after-consumer", label, consumer, unloadedOllamaModels, ...memory }
+    } catch (error) {
+      throw new GateError(`GPU handback failed after ${label} execution: ${error?.message || error}`, { cause: error, phase: "after-consumer" })
+    }
+  }
+
+  async recoverConsumer(lease, { releaseConsumer, waitForConsumerIdle, label = "local consumer" } = {}) {
+    try {
+      await waitForConsumerIdle?.()
+      const consumer = typeof releaseConsumer === "function" ? await releaseConsumer() : undefined
+      const unloadedOllamaModels = await this.unloadOllama()
+      const memory = await this.freeComfy()
+      return { phase: "consumer-recovery", label, consumer, unloadedOllamaModels, ...memory }
+    } finally {
+      await lease?.release().catch(() => {})
     }
   }
 

@@ -107,3 +107,49 @@ test("recovery unloads a model that reloaded after a failed tool", async () => {
     await item.dispose()
   }
 })
+
+test("a non-Comfy consumer unloads before the shared lease is released", async () => {
+  const item = await fixture()
+  const calls = []
+  try {
+    const handoff = await item.gate.beforeConsumer({ consumer: "external-renderer", callID: "render-1" })
+    assert.equal((await item.gate.lock.owner()).consumer, "external-renderer")
+    assert.equal((await item.gate.lock.owner()).target, "local-consumer")
+
+    item.state.models = ["another-agent:latest"]
+    item.state.freeMiB = 9_000
+    const handback = await item.gate.afterConsumer(handoff.lease, {
+      label: "External renderer",
+      waitForConsumerIdle: async () => calls.push("idle"),
+      releaseConsumer: async () => calls.push("released"),
+    })
+
+    assert.deepEqual(calls, ["idle", "released"])
+    assert.deepEqual(handback.unloadedOllamaModels, ["another-agent:latest"])
+    assert.equal(handback.freeMiB, 32_768)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("a failed non-Comfy release keeps the lease available for recovery", async () => {
+  const item = await fixture()
+  try {
+    const handoff = await item.gate.beforeConsumer({ consumer: "external-renderer", callID: "render-2" })
+    await assert.rejects(() => item.gate.afterConsumer(handoff.lease, {
+      label: "External renderer",
+      releaseConsumer: async () => { throw new Error("worker did not stop") },
+    }), /worker did not stop/)
+    assert.equal((await item.gate.lock.owner()).callID, "render-2")
+
+    const recovered = await item.gate.recoverConsumer(handoff.lease, {
+      label: "External renderer",
+      releaseConsumer: async () => ({ workers: "stopped" }),
+    })
+    assert.deepEqual(recovered.consumer, { workers: "stopped" })
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
