@@ -24,3 +24,21 @@ test("only one caller can hold a GPU lease", async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test("release waits for an in-flight heartbeat and never strands owner.json", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "ocvram-lock-heartbeat-test-"))
+  const lockPath = path.join(root, "gpu.lock")
+  const manager = new GpuLockManager({ lockPath, acquireTimeoutSeconds: 1, staleAfterSeconds: 60, heartbeatMs: 1, pollMs: 1 })
+
+  try {
+    for (let index = 0; index < 25; index += 1) {
+      const lease = await manager.acquire({ caller: `stress-${index}` })
+      const heartbeat = lease.heartbeat()
+      assert.equal(await lease.release(), true)
+      await heartbeat
+      assert.equal(await manager.owner(), null)
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

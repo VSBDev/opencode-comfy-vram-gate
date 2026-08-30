@@ -27,23 +27,35 @@ export class GpuLease {
     this.token = token
     this.owner = owner
     this.released = false
+    this.releasing = false
+    this.heartbeatInFlight = null
     this.timer = setInterval(() => this.heartbeat().catch(() => {}), manager.heartbeatMs)
     this.timer.unref?.()
   }
 
   async heartbeat() {
-    if (this.released) return
-    const current = await readOwner(this.manager.lockPath)
-    if (current?.token !== this.token) throw new Error("GPU lease ownership changed")
-    const now = new Date().toISOString()
-    this.owner.updatedAt = now
-    await writeFile(path.join(this.manager.lockPath, "owner.json"), `${JSON.stringify(this.owner, null, 2)}\n`, "utf8")
+    if (this.released || this.releasing) return
+    if (this.heartbeatInFlight) return this.heartbeatInFlight
+    this.heartbeatInFlight = (async () => {
+      const current = await readOwner(this.manager.lockPath)
+      if (current?.token !== this.token) throw new Error("GPU lease ownership changed")
+      const now = new Date().toISOString()
+      this.owner.updatedAt = now
+      await writeFile(path.join(this.manager.lockPath, "owner.json"), `${JSON.stringify(this.owner, null, 2)}\n`, "utf8")
+    })()
+    try {
+      await this.heartbeatInFlight
+    } finally {
+      this.heartbeatInFlight = null
+    }
   }
 
   async release() {
-    if (this.released) return false
+    if (this.released || this.releasing) return false
+    this.releasing = true
     clearInterval(this.timer)
     try {
+      await this.heartbeatInFlight
       const current = await readOwner(this.manager.lockPath)
       if (current?.token !== this.token) {
         this.released = true
@@ -57,6 +69,7 @@ export class GpuLease {
       // silently abandoning a lock whose heartbeat has stopped.
       this.timer = setInterval(() => this.heartbeat().catch(() => {}), this.manager.heartbeatMs)
       this.timer.unref?.()
+      this.releasing = false
       throw error
     }
   }

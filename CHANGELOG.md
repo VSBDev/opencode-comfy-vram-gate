@@ -18,6 +18,11 @@ All notable changes to this project will be documented here. The format follows 
 - Verify that an external consumer has unloaded its own workers before free
   VRAM is checked and the shared lease is released.
 
+### Fixed
+
+- Serialize lease release with an in-flight heartbeat so a concurrent
+  `owner.json` update cannot strand a live-looking lock after handback.
+
 ## [0.1.1] - 2026-08-19
 
 ### Fixed
