@@ -20,7 +20,15 @@ async function fixture(options) {
   return {
     ...services,
     root,
-    gate: new VramGate(config),
+    gate: new VramGate(config, {
+      inspectGpu: async () => ({
+        backend: "mock",
+        deviceIndex: 0,
+        name: "Mock GPU",
+        totalMiB: services.state.totalMiB,
+        freeMiB: services.state.freeMiB,
+      }),
+    }),
     async dispose() {
       await services.close()
       await rm(root, { recursive: true, force: true })
@@ -102,6 +110,112 @@ test("recovery unloads a model that reloaded after a failed tool", async () => {
     assert.deepEqual(recovered.unloadedOllamaModels, ["large-local-model:latest"])
     assert.equal(item.state.ollamaUnloadRequests.length, 2)
     assert.equal(item.state.comfyFreeRequests, 2)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("a non-Comfy consumer unloads before the shared lease is released", async () => {
+  const item = await fixture()
+  const calls = []
+  try {
+    const handoff = await item.gate.beforeConsumer({ consumer: "external-renderer", callID: "render-1" })
+    assert.equal((await item.gate.lock.owner()).consumer, "external-renderer")
+    assert.equal((await item.gate.lock.owner()).target, "local-consumer")
+
+    item.state.models = ["another-agent:latest"]
+    item.state.freeMiB = 9_000
+    const handback = await item.gate.afterConsumer(handoff.lease, {
+      label: "External renderer",
+      waitForConsumerIdle: async () => calls.push("idle"),
+      releaseConsumer: async () => calls.push("released"),
+    })
+
+    assert.deepEqual(calls, ["idle", "released"])
+    assert.deepEqual(handback.unloadedOllamaModels, ["another-agent:latest"])
+    assert.equal(handback.freeMiB, 32_768)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("a local consumer can declare a smaller task-specific free-VRAM requirement", async () => {
+  const item = await fixture({ freedMiB: 24_000 })
+  try {
+    const handoff = await item.gate.beforeConsumer(
+      { consumer: "image-renderer", callID: "render-small" },
+      { requiredFreeMiB: 22_000 },
+    )
+    assert.equal(handoff.detail.targetMiB, 22_000)
+    assert.equal(handoff.lease.owner.requiredFreeMiB, 22_000)
+
+    const handback = await item.gate.afterConsumer(handoff.lease, {
+      releaseConsumer: async () => ({ workers: "stopped" }),
+    })
+    assert.equal(handback.targetMiB, 22_000)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("a generic consumer runs when optional GPU peers are offline", async () => {
+  const item = await fixture()
+  const calls = []
+  try {
+    item.state.freeMiB = 24_000
+    await Promise.all([item.stopOllama(), item.stopComfy()])
+
+    const handoff = await item.gate.beforeConsumer(
+      { consumer: "standalone-renderer", callID: "render-offline" },
+      { requiredFreeMiB: 22_000 },
+    )
+    assert.equal(handoff.detail.ollama.available, false)
+    assert.equal(handoff.detail.comfy.available, false)
+    assert.equal(handoff.detail.freeMiB, 24_000)
+
+    const handback = await item.gate.afterConsumer(handoff.lease, {
+      releaseConsumer: async () => calls.push("released"),
+    })
+    assert.deepEqual(calls, ["released"])
+    assert.equal(handback.ollama.available, false)
+    assert.equal(handback.comfy.available, false)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("the configured free-VRAM target still applies when a consumer omits a requirement", async () => {
+  const item = await fixture({ freedMiB: 24_000 })
+  try {
+    await assert.rejects(
+      () => item.gate.beforeConsumer({ consumer: "default-renderer", callID: "render-default", requiredFreeMiB: 1 }),
+      /at least 28000 MiB free VRAM/,
+    )
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("a failed non-Comfy release keeps the lease available for recovery", async () => {
+  const item = await fixture()
+  try {
+    const handoff = await item.gate.beforeConsumer({ consumer: "external-renderer", callID: "render-2" })
+    await assert.rejects(() => item.gate.afterConsumer(handoff.lease, {
+      label: "External renderer",
+      releaseConsumer: async () => { throw new Error("worker did not stop") },
+    }), /worker did not stop/)
+    assert.equal((await item.gate.lock.owner()).callID, "render-2")
+
+    const recovered = await item.gate.recoverConsumer(handoff.lease, {
+      label: "External renderer",
+      releaseConsumer: async () => ({ workers: "stopped" }),
+    })
+    assert.deepEqual(recovered.consumer, { workers: "stopped" })
     assert.equal(await item.gate.lock.owner(), null)
   } finally {
     await item.dispose()

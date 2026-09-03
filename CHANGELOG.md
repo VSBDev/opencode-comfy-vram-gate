@@ -4,6 +4,38 @@ All notable changes to this project will be documented here. The format follows 
 
 ## [Unreleased]
 
+### Added
+
+- Optional task-specific `requiredFreeMiB` targets for generic local consumers;
+  handback and recovery reuse the requirement stored on the lease.
+- A process-level NVIDIA GPU memory inspector, public inspector export, and
+  injectable inspector contract for other GPU backends.
+
+### Changed
+
+- Generic consumers no longer require Ollama or ComfyUI to be running. Online
+  peers still participate in safe model release, while free VRAM is verified
+  independently through the configured GPU inspector.
+
+## [0.2.0] - 2026-08-30
+
+### Added
+
+- Generic `beforeConsumer`, `afterConsumer`, and `recoverConsumer` lifecycle
+  methods for local inference applications.
+- A public lock export so integrations can inspect the shared lease protocol
+  without reaching into package internals.
+
+### Changed
+
+- Verify that an external consumer has unloaded its own workers before free
+  VRAM is checked and the shared lease is released.
+
+### Fixed
+
+- Serialize lease release with an in-flight heartbeat so a concurrent
+  `owner.json` update cannot strand a live-looking lock after handback.
+
 ## [0.1.1] - 2026-08-19
 
 ### Fixed

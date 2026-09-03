@@ -1,13 +1,15 @@
 {
   "name": "opencode-comfy-vram-gate",
-  "version": "0.1.1",
-  "description": "Exclusive single-GPU handoff between Ollama and local ComfyUI for OpenCode tool calls.",
+  "version": "0.2.0",
+  "description": "Exclusive single-GPU handoff between Ollama, ComfyUI, and other local GPU consumers.",
   "type": "module",
   "main": "./src/plugin.js",
   "exports": {
     ".": "./src/plugin.js",
     "./core": "./src/gate.js",
-    "./config": "./src/config.js"
+    "./config": "./src/config.js",
+    "./gpu": "./src/gpu.js",
+    "./lock": "./src/lock.js"
   },
   "bin": {
     "opencode-comfy-vram-gate": "./bin/cli.js",
@@ -26,7 +28,7 @@
     "CONTRIBUTING.md"
   ],
   "scripts": {
-    "check": "node --check src/config.js && node --check src/http.js && node --check src/lock.js && node --check src/gate.js && node --check src/staging.js && node --check src/plugin.js && node --check bin/cli.js && node --check bin/create-loader.js",
+    "check": "node --check src/config.js && node --check src/gpu.js && node --check src/http.js && node --check src/lock.js && node --check src/gate.js && node --check src/staging.js && node --check src/plugin.js && node --check bin/cli.js && node --check bin/create-loader.js",
     "test": "node --test test/*.test.js",
     "verify": "npm run check && npm test"
   },

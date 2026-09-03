@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG = Object.freeze({
     url: "http://127.0.0.1:8188",
   },
   gpu: {
+    deviceIndex: 0,
     minimumFreeMiB: null,
     minimumFreeRatio: 0.85,
   },
@@ -144,6 +145,7 @@ function environmentOverlay(env) {
   set("comfy", "url", env.OCVRAM_COMFY_URL)
   if (env.OCVRAM_MIN_FREE_MIB !== undefined) set("gpu", "minimumFreeMiB", number(env.OCVRAM_MIN_FREE_MIB, "OCVRAM_MIN_FREE_MIB"))
   if (env.OCVRAM_MIN_FREE_RATIO !== undefined) set("gpu", "minimumFreeRatio", number(env.OCVRAM_MIN_FREE_RATIO, "OCVRAM_MIN_FREE_RATIO"))
+  if (env.OCVRAM_GPU_DEVICE_INDEX !== undefined) set("gpu", "deviceIndex", number(env.OCVRAM_GPU_DEVICE_INDEX, "OCVRAM_GPU_DEVICE_INDEX"))
   if (env.OCVRAM_REQUEST_TIMEOUT_MS !== undefined) set("timeouts", "requestMs", number(env.OCVRAM_REQUEST_TIMEOUT_MS, "OCVRAM_REQUEST_TIMEOUT_MS"))
   if (env.OCVRAM_HANDOFF_TIMEOUT_SECONDS !== undefined) set("timeouts", "handoffSeconds", number(env.OCVRAM_HANDOFF_TIMEOUT_SECONDS, "OCVRAM_HANDOFF_TIMEOUT_SECONDS"))
   if (env.OCVRAM_RENDER_TIMEOUT_SECONDS !== undefined) set("timeouts", "renderSeconds", number(env.OCVRAM_RENDER_TIMEOUT_SECONDS, "OCVRAM_RENDER_TIMEOUT_SECONDS"))
@@ -171,6 +173,7 @@ export function validateConfig(input) {
   if (config.ollama.unloadPolicy === "listed" && config.ollama.models.length === 0) throw new Error("ollama.models cannot be empty when unloadPolicy is 'listed'")
   if (config.gpu.minimumFreeMiB !== null && config.gpu.minimumFreeMiB < 0) throw new Error("gpu.minimumFreeMiB must be null or non-negative")
   if (!(config.gpu.minimumFreeRatio > 0 && config.gpu.minimumFreeRatio <= 1)) throw new Error("gpu.minimumFreeRatio must be greater than 0 and at most 1")
+  if (!Number.isInteger(config.gpu.deviceIndex) || config.gpu.deviceIndex < 0) throw new Error("gpu.deviceIndex must be a non-negative integer")
   for (const [name, value] of Object.entries(config.timeouts)) {
     if (!(Number(value) > 0)) throw new Error(`timeouts.${name} must be greater than 0`)
   }

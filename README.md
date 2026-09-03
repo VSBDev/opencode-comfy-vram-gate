@@ -20,7 +20,7 @@ the LLM revises the prompt and iterates
 
 Large language and generative-media models often cannot remain loaded together. Without orchestration, an agent can plan the render but exhaust VRAM when it invokes ComfyUI, or ComfyUI can leave too little memory for the LLM to inspect the result and continue. The gate gives each stage temporary ownership of the GPU, making multi-step local workflows practical on a single card.
 
-The mechanism is model-agnostic: ComfyUI may run Krea, LTX, MiniMax, or any other configured workflow, and Ollama may serve any suitable text or vision model. The plugin does not choose models, prompts, LoRAs, workflows, or iteration policy; those remain the responsibility of the user's agent instructions, skills, and MCP tools.
+The mechanism is model-agnostic: ComfyUI may run Krea, LTX, MiniMax, or any other configured workflow, and Ollama may serve any suitable text or vision model. The core can also bracket an arbitrary local GPU consumer while using the same exclusive lease. The plugin does not choose models, prompts, LoRAs, workflows, or iteration policy; those remain the responsibility of the user's agent instructions, skills, and MCP tools.
 
 ## What it does
 
@@ -36,6 +36,45 @@ For each configured heavy ComfyUI MCP tool call, the plugin:
 If OpenCode misses an `after` hook because a tool fails, the session recovery hook waits for ComfyUI to finish, frees its models, and releases the orphaned lease.
 
 The lease is a heartbeat-backed atomic directory lock. It prevents two OpenCode sessions or processes on the same host from handing the same GPU to different jobs at once.
+
+### Other local GPU consumers
+
+The `opencode-comfy-vram-gate/core` export exposes `beforeConsumer()`, `afterConsumer()`, `recoverConsumer()`, and `consumerStatus()` for applications that run their own inference engine. Generic consumers do not require Ollama or ComfyUI to be running. The gate acquires the same exclusive lease, unloads reachable Ollama models, asks a reachable and idle ComfyUI peer to release cached models, and verifies memory through `nvidia-smi` independently of either service. `afterConsumer()` keeps the lease until the application-provided `releaseConsumer` callback has stopped and unloaded its worker.
+
+```js
+import { VramGate } from "opencode-comfy-vram-gate/core"
+import { loadConfig } from "opencode-comfy-vram-gate/config"
+
+const gate = new VramGate(await loadConfig())
+const handoff = await gate.beforeConsumer(
+  { consumer: "my-app", callID: "render-1" },
+  { requiredFreeMiB: 22_000 },
+)
+try {
+  await render()
+  await gate.afterConsumer(handoff.lease, {
+    label: "My app",
+    releaseConsumer: () => engine.unload(),
+  })
+} catch (error) {
+  await gate.recoverConsumer(handoff.lease, {
+    label: "My app",
+    releaseConsumer: () => engine.unload(),
+  })
+  throw error
+}
+```
+
+`requiredFreeMiB` is optional. It lets a consumer declare the requirement of
+the specific task it is about to run instead of inheriting one global maximum.
+The requirement is stored on the lease and automatically reused during normal
+handback or recovery. Consumers that omit it retain the configured gate target.
+The default inspector targets `gpu.deviceIndex` and can be imported from the
+`opencode-comfy-vram-gate/gpu` export. Non-NVIDIA integrations can inject an
+`inspectGpu` callback returning `{ name, totalMiB, freeMiB }` without changing
+the lease or peer lifecycle.
+
+Every process sharing one physical GPU must resolve the same `lock.path`. The existing OpenCode Comfy plugin and external consumers therefore cannot start heavy work at the same time.
 
 ## Scope
 

@@ -21,7 +21,7 @@ function json(response, status, payload) {
   response.end(JSON.stringify(payload))
 }
 
-export async function startMockServices({ busy = false } = {}) {
+export async function startMockServices({ busy = false, freedMiB = 32_768 } = {}) {
   const state = {
     models: ["large-local-model:latest"],
     queue: busy ? { queue_running: [[1]], queue_pending: [] } : { queue_running: [], queue_pending: [] },
@@ -52,7 +52,7 @@ export async function startMockServices({ busy = false } = {}) {
     if (request.method === "POST" && request.url === "/free") {
       await readBody(request)
       state.comfyFreeRequests += 1
-      state.freeMiB = state.totalMiB
+      state.freeMiB = freedMiB
       return json(response, 200, { ok: true })
     }
     return json(response, 404, { error: "not found" })
@@ -63,15 +63,23 @@ export async function startMockServices({ busy = false } = {}) {
     new Promise((resolve) => comfy.listen(0, "127.0.0.1", resolve)),
   ])
 
+  const closeServer = async (server) => {
+    if (!server.listening) return
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  }
+
   return {
     state,
     ollamaUrl: `http://127.0.0.1:${ollama.address().port}`,
     comfyUrl: `http://127.0.0.1:${comfy.address().port}`,
+    async stopOllama() {
+      await closeServer(ollama)
+    },
+    async stopComfy() {
+      await closeServer(comfy)
+    },
     async close() {
-      await Promise.all([
-        new Promise((resolve, reject) => ollama.close((error) => error ? reject(error) : resolve())),
-        new Promise((resolve, reject) => comfy.close((error) => error ? reject(error) : resolve())),
-      ])
+      await Promise.all([closeServer(ollama), closeServer(comfy)])
     },
   }
 }

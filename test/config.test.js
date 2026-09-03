@@ -22,6 +22,7 @@ test("invalid or unsafe configuration is rejected", () => {
   assert.throws(() => mergeConfig(DEFAULT_CONFIG, { ollama: { url: "file:///tmp/socket" } }), /http or https/)
   assert.throws(() => mergeConfig(DEFAULT_CONFIG, { ollama: { unloadPolicy: "listed", models: [] } }), /cannot be empty/)
   assert.throws(() => mergeConfig(DEFAULT_CONFIG, { gpu: { minimumFreeRatio: 1.1 } }), /at most 1/)
+  assert.throws(() => mergeConfig(DEFAULT_CONFIG, { gpu: { deviceIndex: 0.5 } }), /non-negative integer/)
   assert.throws(() => mergeConfig(DEFAULT_CONFIG, { plugin: { forceBlocking: "false" } }), /true or false/)
   assert.throws(() => mergeConfig(DEFAULT_CONFIG, { staging: { enabled: true } }), /hostInputRoot/)
 })
