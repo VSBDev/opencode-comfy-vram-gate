@@ -8,6 +8,14 @@ All notable changes to this project will be documented here. The format follows 
 
 - Optional task-specific `requiredFreeMiB` targets for generic local consumers;
   handback and recovery reuse the requirement stored on the lease.
+- A process-level NVIDIA GPU memory inspector, public inspector export, and
+  injectable inspector contract for other GPU backends.
+
+### Changed
+
+- Generic consumers no longer require Ollama or ComfyUI to be running. Online
+  peers still participate in safe model release, while free VRAM is verified
+  independently through the configured GPU inspector.
 
 ## [0.2.0] - 2026-08-30
 

@@ -20,7 +20,15 @@ async function fixture(options) {
   return {
     ...services,
     root,
-    gate: new VramGate(config),
+    gate: new VramGate(config, {
+      inspectGpu: async () => ({
+        backend: "mock",
+        deviceIndex: 0,
+        name: "Mock GPU",
+        totalMiB: services.state.totalMiB,
+        freeMiB: services.state.freeMiB,
+      }),
+    }),
     async dispose() {
       await services.close()
       await rm(root, { recursive: true, force: true })
@@ -147,6 +155,33 @@ test("a local consumer can declare a smaller task-specific free-VRAM requirement
       releaseConsumer: async () => ({ workers: "stopped" }),
     })
     assert.equal(handback.targetMiB, 22_000)
+    assert.equal(await item.gate.lock.owner(), null)
+  } finally {
+    await item.dispose()
+  }
+})
+
+test("a generic consumer runs when optional GPU peers are offline", async () => {
+  const item = await fixture()
+  const calls = []
+  try {
+    item.state.freeMiB = 24_000
+    await Promise.all([item.stopOllama(), item.stopComfy()])
+
+    const handoff = await item.gate.beforeConsumer(
+      { consumer: "standalone-renderer", callID: "render-offline" },
+      { requiredFreeMiB: 22_000 },
+    )
+    assert.equal(handoff.detail.ollama.available, false)
+    assert.equal(handoff.detail.comfy.available, false)
+    assert.equal(handoff.detail.freeMiB, 24_000)
+
+    const handback = await item.gate.afterConsumer(handoff.lease, {
+      releaseConsumer: async () => calls.push("released"),
+    })
+    assert.deepEqual(calls, ["released"])
+    assert.equal(handback.ollama.available, false)
+    assert.equal(handback.comfy.available, false)
     assert.equal(await item.gate.lock.owner(), null)
   } finally {
     await item.dispose()

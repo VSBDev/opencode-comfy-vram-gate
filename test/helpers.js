@@ -63,15 +63,23 @@ export async function startMockServices({ busy = false, freedMiB = 32_768 } = {}
     new Promise((resolve) => comfy.listen(0, "127.0.0.1", resolve)),
   ])
 
+  const closeServer = async (server) => {
+    if (!server.listening) return
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  }
+
   return {
     state,
     ollamaUrl: `http://127.0.0.1:${ollama.address().port}`,
     comfyUrl: `http://127.0.0.1:${comfy.address().port}`,
+    async stopOllama() {
+      await closeServer(ollama)
+    },
+    async stopComfy() {
+      await closeServer(comfy)
+    },
     async close() {
-      await Promise.all([
-        new Promise((resolve, reject) => ollama.close((error) => error ? reject(error) : resolve())),
-        new Promise((resolve, reject) => comfy.close((error) => error ? reject(error) : resolve())),
-      ])
+      await Promise.all([closeServer(ollama), closeServer(comfy)])
     },
   }
 }
